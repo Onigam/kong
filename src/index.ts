@@ -77,17 +77,57 @@ function dca(
   return wallet;
 }
 
+/**
+ * Calculates the liquidation price for a long position with leverage.
+ * The liquidation price is the price at which the position is closed automatically.
+ * It is calculated based on the leverage level and the distance in percent between the entry price and the liquidation price.
+ *
+ * For example, if the entry price is $10,000 and the leverage is 25x,
+ * the liquidation price will be $9,600:
+ *
+ * 10000 - ((100 / 25) / 100) * 10000 = 9600
+ *
+ * Verify calculation here https://leverage.trading/liquidation-price-calculator/
+ *
+ * @param entryPrice
+ * @param leverage
+ * @returns
+ * TODO put fees as a variable
+ */
 function calculateLongLiquidationPrice(
   entryPrice: number,
   leverage: number
 ): number {
-  // TODO put fees as a variable
-
   const distance = 100 / leverage;
-  const distanceInDollars = (distance / 25) * entryPrice;
+  const distanceInDollars = (distance / 100) * entryPrice;
   const liquidationPrice = entryPrice - distanceInDollars;
 
   return liquidationPrice;
+}
+
+/**
+ * Calculates the profit limit price for a long position with leverage.
+ * The profit limit price is the price at which the position is closed automatically.
+ * It is calculated based on the leverage level and the profit in percent.
+ *
+ * For example, if the entry price is $10,000 and the profit in percent is 200%,
+ * the profit limit price will be $11,000:
+ *
+ * 10000 + ((10000 * 200) / 100) / 20 = 11000
+ *
+ * Verify the calculation here: https://www.binance.com/en/futures/BTCUSDT_PERPETUAL/calculator
+ *
+ * @param entryPrice
+ * @param profitInPercent
+ * @param leverage
+ * @returns
+ */
+function calculateProfitLimit(
+  entryPrice: number,
+  profitInPercent: number,
+  leverage: number
+): number {
+  return entryPrice + (entryPrice * profitInPercent) / 100 / leverage;
 }
 
 /**
@@ -107,12 +147,12 @@ function dcaWithLeverage(
   leverage: number,
   profitInPercent: number = 100
 ): {
-  walletLeverage: number;
+  wallet: number;
   liquidationsCount: number;
   takeProfitsCount: number;
   closedPositionsCount: number;
 } {
-  let walletLeverage = 0;
+  let wallet = 0;
   let liquidationsCount = 0;
   let takeProfitsCount = 0;
   let closedPositionsCount = 0;
@@ -123,6 +163,7 @@ function dcaWithLeverage(
     i += buyFrequencyInHours
   ) {
     const entryPrice = data[i].open;
+    //console.log("entryPrice", entryPrice);
 
     // Calculate the amount of Bitcoin bought with the buy amount and leverage
     const btcBought = (buyAmount * leverage) / entryPrice;
@@ -132,40 +173,34 @@ function dcaWithLeverage(
       entryPrice,
       leverage
     );
-
-    /*console.log(
-      "entry price - liquidation price",
-      entryPrice,
-      liquidationPrice
-    );
-
-    /*console.log(
-      "entry price - liquidation price",
-      entryPrice,
-      liquidationPrice
-    );*/
+    //console.log("liquidationPrice", liquidationPrice);
 
     // Check if the liquidation price is hit within the long duration
     let liquidated = false;
-    // Calculate a profit limit price based on a 200% profit and leverage
-    let profitLimitPrice =
-      entryPrice + (entryPrice * profitInPercent) / 100 / leverage;
+
+    // Calculate a profit limit price based on profit in percentage and leverage
+    let profitLimitPrice = calculateProfitLimit(
+      entryPrice,
+      profitInPercent,
+      leverage
+    );
     //console.log("profitLimitPrice", profitLimitPrice);
+
+    // Check if the profit limit price is hit within the long duration
     let profitTaken = false;
+
     const exitIndex = i + longDurationHours;
 
     for (let j = i + 1; j <= exitIndex; j++) {
-      if (data[j]?.low < liquidationPrice) {
+      if (data[j]?.low <= liquidationPrice) {
         liquidated = true;
         liquidationsCount++;
-        //console.log("Liquidated :(");
         break;
       }
 
-      if (data[j]?.high > profitLimitPrice) {
+      if (data[j]?.high >= profitLimitPrice) {
         profitTaken = true;
         takeProfitsCount++;
-        //console.log("Profit taken !!!");
         break;
       }
     }
@@ -198,12 +233,12 @@ function dcaWithLeverage(
       //console.log("remaningAmount", remaningAmount);
 
       // Here we consider that we rebuy bitcoin with the remaining value one 1h after the exit
-      walletLeverage += remaningAmount / data[exitIndex].close;
+      wallet += remaningAmount / data[exitIndex].close;
     }
   }
 
   return {
-    walletLeverage,
+    wallet,
     liquidationsCount,
     takeProfitsCount,
     closedPositionsCount,
@@ -232,11 +267,11 @@ function filterDataByDateAndHour(
   const data = await parseCSV("data/btc_usdt.csv");
 
   const dcaAmount = 100;
-  const frequencyInDays = 4;
-  const longDurationInHours = 24;
-  const dcaDurationInDays = 300;
-  const startingDate = "2022-04-15";
-  const startingHour = "14:00";
+  const frequencyInDays = 3;
+  const longDurationInHours = 12;
+  const dcaDurationInDays = 365 * 3;
+  const startingDate = "2020-01-01";
+  const startingHour = "2:00";
 
   // Filter data to include only the data points within the specified starting date, starting hour, and DCA duration
   const filteredData = filterDataByDateAndHour(
@@ -258,12 +293,45 @@ function filterDataByDateAndHour(
 
   console.log("BTC accumulated with classic DCA", wallet.toFixed(4));
 
+  const leverage = 50;
+  const profitInPercent = 300;
+
+  /*
+  console.table(
+    dcaWithLeverage(
+      filteredData,
+      buyFrequencyInHours,
+      dcaAmount,
+      longDurationInHours,
+      leverage,
+      profitInPercent
+    )
+  );*/
+
+  // Simulate the DCA strategy with different leverage and profit limit values
+
+  simulateEveryLeverages(
+    filteredData,
+    wallet,
+    buyFrequencyInHours,
+    dcaAmount,
+    longDurationInHours
+  );
+})();
+
+function simulateEveryLeverages(
+  filteredData: PriceData[],
+  dcaClassicWallet: number,
+  buyFrequencyInHours: number,
+  dcaAmount: number,
+  longDurationInHours: number
+) {
   let leverageResults = [];
 
   for (let i = 5; i <= 100; i++) {
     for (let j = 50; j <= 1000; j += 50) {
       const {
-        walletLeverage,
+        wallet,
         closedPositionsCount,
         liquidationsCount,
         takeProfitsCount,
@@ -276,12 +344,12 @@ function filterDataByDateAndHour(
         j
       );
 
-      const diffenceInPercentage = (walletLeverage / wallet) * 100 - 100;
+      const diffenceInPercentage = (wallet / dcaClassicWallet) * 100 - 100;
 
       leverageResults.push({
         Leverage: i,
         "Auto take profit in %": j,
-        "BTC accumulated": walletLeverage.toFixed(4),
+        "BTC accumulated": wallet.toFixed(4),
         "BTC accumulated in % vs classic DCA": diffenceInPercentage.toFixed(2),
         "Closed positions": closedPositionsCount,
         Liquidations: liquidationsCount,
@@ -297,5 +365,4 @@ function filterDataByDateAndHour(
         a["BTC accumulated in % vs classic DCA"]
     )
   );
-  //console.table(leverageBadResults);
-})();
+}
