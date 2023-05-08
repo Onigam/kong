@@ -268,10 +268,10 @@ function filterDataByDateAndHour(
 
   const dcaAmount = 100;
   const frequencyInDays = 3;
-  const longDurationInHours = 12;
+  const longDurationInHours = 24 * 3;
   const dcaDurationInDays = 365 * 3;
-  const startingDate = "2020-01-01";
-  const startingHour = "2:00";
+  const startingDate = "2020-11-08";
+  const startingHour = "22:00";
 
   // Filter data to include only the data points within the specified starting date, starting hour, and DCA duration
   const filteredData = filterDataByDateAndHour(
